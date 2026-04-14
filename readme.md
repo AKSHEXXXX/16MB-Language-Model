@@ -1,9 +1,43 @@
-# 🔩 NanoForge — 16MB Language Model
+# 🔩 A 16MB Language Model
 
-> Training the most accurate language model that fits inside **16 MB** from scratch.  
-> Built for the [OpenAI Parameter Golf Challenge](https://github.com/openai/parameter-golf).
+> A challenge-driven language model project built for the **OpenAI Parameter Golf** competition.  
+> Goal: train the strongest possible language model that stays **under 16 MB**.
 
-***
+---
+
+## 🏆 About the Challenge
+
+This entire project is based on the **OpenAI Parameter Golf** challenge.
+
+**OpenAI — Parameter Golf** is an open ML/research challenge focused on training the **best language model that fits in 16 MB**. The core constraint is extreme efficiency: the combined artifact size of the **model weights + training code must stay under 16 MB**, and training must complete within **10 minutes on 8×H100 GPUs**.
+
+### Challenge Details
+
+| | |
+|---|---|
+| **Organizer** | OpenAI |
+| **Type** | ML / Research — Open Challenge |
+| **Prize** | $1,000,000 in compute credits |
+| **Deadline** | April 30, 2026 |
+| **Evaluation** | bits-per-byte (BPB) on FineWeb validation set — lower is better |
+
+### What the challenge involves
+
+- Train a language model with **weights + training code combined under 16 MB**
+- Must train in **under 10 minutes on 8×H100 GPUs**
+- Evaluated by compression on the FineWeb validation set using **bits per byte (BPB)**
+- OpenAI provides the baseline repo, fixed dataset, and evaluation scripts
+- Top performers may be considered for interviews through OpenAI's junior researcher pipeline
+
+### Why this project exists
+
+This repo is my attempt to solve that challenge by pushing model efficiency through quantization-aware training, small-vocabulary design, U-Net skip connections, the Muon optimizer, and an INT6 compression pipeline — reinvesting every freed byte back into model capacity.
+
+This is not just "a small language model." It is a **challenge-driven engineering effort** built specifically around the OpenAI Parameter Golf rules, constraints, and evaluation setup.
+
+🔗 [openai/parameter-golf on GitHub](https://github.com/openai/parameter-golf)
+
+---
 
 ## 🎯 What Is This?
 
@@ -11,7 +45,7 @@ NanoForge is a from-scratch language model trained to maximize accuracy under a 
 
 The evaluation metric is `val_bpb` (bits-per-byte) — a tokenizer-agnostic compression score. **Lower is better.**
 
-***
+---
 
 ## 📊 Results
 
@@ -31,7 +65,7 @@ The evaluation metric is `val_bpb` (bits-per-byte) — a tokenizer-agnostic comp
 
 All runs are **under 16 MB**. Each experiment builds on the previous one.
 
-***
+---
 
 ## 🧠 Algorithms & Techniques
 
@@ -39,7 +73,7 @@ All runs are **under 16 MB**. Each experiment builds on the previous one.
 
 Standard GPT-2 uses 50,257 tokens. NanoForge uses a custom SentencePiece BPE tokenizer with only **1024 tokens**, eliminating ~74 MB of embedding parameters. The `val_bpb` metric is tokenizer-agnostic (measures raw bytes), so this is a free win — no quality penalty.
 
-***
+---
 
 ### 2. 🔗 Tied Embeddings
 
@@ -50,7 +84,7 @@ The input embedding matrix and the output projection (`lm_head`) **share the sam
 logits = F.linear(x, self.tok_emb.weight)  # reuses input embedding
 ```
 
-***
+---
 
 ### 3. 👁️ Grouped Query Attention (GQA)
 
@@ -61,13 +95,11 @@ num_heads    = 8   ← query heads
 num_kv_heads = 4   ← key/value heads (shared)
 ```
 
-***
+---
 
 ### 4. 🏗️ U-Net Skip Connections
 
-Instead of a flat stack of transformer blocks, NanoForge uses a **U-Net-style architecture**. The first half (encoder) saves residual activations. The second half (decoder) re-injects them in reverse order via learnable skip weights.
-
-This dramatically improves gradient flow through deep networks, giving better quality at the same parameter count — essentially a free accuracy boost.
+Instead of a flat stack of transformer blocks, NanoForge uses a **U-Net-style architecture**. The first half (encoder) saves residual activations. The second half (decoder) re-injects them in reverse order via learnable skip weights. This dramatically improves gradient flow through deep networks, giving better quality at the same parameter count.
 
 ```python
 # Encoder stores skip connections
@@ -81,13 +113,11 @@ for i in range(num_decoder_layers):
     x = blocks[num_encoder_layers + i](x, x0)
 ```
 
-***
+---
 
 ### 5. ⚡ Muon Optimizer
 
-All 2D weight matrices (attention projections, MLP weights) are trained with the **Muon optimizer** instead of Adam. Muon applies Newton-Schulz orthogonalization to gradients before the update, giving faster convergence and better final quality within the same number of iterations.
-
-Scalar parameters, embeddings, and control tensors use Adam as usual.
+All 2D weight matrices (attention projections, MLP weights) are trained with the **Muon optimizer** instead of Adam. Muon applies Newton-Schulz orthogonalization to gradients before the update, giving faster convergence and better final quality within the same number of iterations. Scalar parameters, embeddings, and control tensors use Adam as usual.
 
 ```python
 # Orthogonalize gradient update
@@ -96,7 +126,7 @@ g *= max(1, g.size(0) / g.size(1)) ** 0.5
 model_weight -= lr * g
 ```
 
-***
+---
 
 ### 6. 🟦 relu² Activation
 
@@ -108,7 +138,7 @@ def forward(self, x):
     return self.proj(x.square())  # relu²
 ```
 
-***
+---
 
 ### 7. 🔢 INT6 Post-Training Quantization (PTQ)
 
@@ -119,7 +149,7 @@ After training in bf16/fp32, all large 2D weight matrices are quantized to **6-b
 - **Small tensor passthrough**: tensors with < 65,536 elements kept as fp16
 - **Control tensor passthrough**: scales, norms, skip weights kept as fp32
 
-The key advantage over INT8: INT6-range values have lower entropy, which means **zlib compresses them ~25% better**, freeing budget for more layers.
+The key advantage over INT8: INT6-range values have lower entropy, meaning **zlib compresses them ~25% better**, freeing budget for more layers.
 
 ```python
 INT6_QUANT_MAX = 31  # 6-bit signed symmetric
@@ -132,7 +162,7 @@ q = torch.clamp(
 ).to(torch.int8)
 ```
 
-***
+---
 
 ### 8. 🎯 INT6 Quantization-Aware Training (QAT)
 
@@ -140,9 +170,9 @@ PTQ introduces a small accuracy gap because weights were not trained expecting I
 
 - **Forward pass**: weights are fake-quantized to INT6 range
 - **Backward pass**: gradients flow through as if no quantization happened
-- **Result**: weights learn distributions that survive INT6 rounding, recovering accuracy lost in PTQ
+- **Result**: weights learn distributions that survive INT6 rounding
 
-This is what pushed us from **1.224 → 1.192 val_bpb**.
+**This is what pushed us from 1.224 → 1.192 val_bpb.**
 
 ```python
 def fake_quant_int6(w):
@@ -157,13 +187,13 @@ class CastedLinear(nn.Linear):
         return F.linear(x, w.to(x.dtype))
 ```
 
-***
+---
 
 ### 9. 📦 zlib Compression (Level 9)
 
 The final exported model is zlib-compressed at maximum level. Because INT6 values are restricted to [-31, 31] (63 distinct values vs 255 for INT8), they compress significantly better. The submission includes a decompressor that restores weights to fp32/bf16 for evaluation.
 
-***
+---
 
 ### 10. 💰 INT6 Budget → Extra Capacity
 
@@ -177,7 +207,7 @@ The space saved by INT6 over INT8 compression (~2.5 MB) is reinvested into makin
 | val_bpb | 1.224 | **1.192** ✅ |
 | Model size | ~10 MB | ~11 MB |
 
-***
+---
 
 ## 🔁 Full Compression Pipeline
 
@@ -211,7 +241,7 @@ The space saved by INT6 over INT8 compression (~2.5 MB) is reinvested into makin
          ✅ Under 16 MB  |  val_bpb: 1.192
 ```
 
-***
+---
 
 ## 🚀 Getting Started
 
@@ -251,7 +281,7 @@ python3 scripts/patch_qat.py
 ### Run experiments
 
 ```bash
-# Exp 1: INT8 Baseline — validate setup (val_bpb: ~1.224)
+# Exp 1: INT8 Baseline — validate setup (val_bpb: 1.224)
 python3 scripts/run_baseline.py
 
 # Exp 2: INT6 PTQ — more layers, better quality (val_bpb: ~1.200)
@@ -273,13 +303,11 @@ print('✅ Under 16 MB limit')
 "
 ```
 
-***
+---
 
 ## 🖥️ Hardware
 
 Developed and tested on **Kaggle T4 GPU (14.5 GB VRAM)**.
-
-T4-specific optimizations applied:
 
 | Setting | Value | Why |
 |---------|-------|-----|
@@ -288,7 +316,7 @@ T4-specific optimizations applied:
 | `TRAIN_BATCH_TOKENS` | `131072` | Reduced from default 524,288 to fit 14 GB |
 | SDPA backend | Math backend | Fixes `Invalid backend` crash on T4 |
 
-***
+---
 
 ## 📁 Repository Structure
 
@@ -308,7 +336,7 @@ nanoforge/
 > `train_gpt_fixed.py` and `train_gpt_int6.py` are **generated files** — not committed.  
 > Run `patch_sdpa.py` → `patch_int6.py` to regenerate them fresh from the original repo.
 
-***
+---
 
 ## 🙏 Credits
 
@@ -317,9 +345,9 @@ nanoforge/
 - [modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt) — U-Net skip connections, relu² MLP, training setup
 - [FineWeb Dataset](https://huggingface.co/datasets/HuggingFaceFW/fineweb) by HuggingFace
 
-***
+---
 
 <p align="center">
   Built to be small. Trained to be sharp. 🔩<br/>
-  <strong>1.224 → 1.192 val_bpb &nbsp;|&nbsp; Under 16 MB</strong>
+  <strong>1.224 → 1.192 val_bpb &nbsp;|&nbsp; Under 16 MB &nbsp;|&nbsp; OpenAI Parameter Golf Challenge</strong>
 </p>
