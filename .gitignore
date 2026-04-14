@@ -1,0 +1,10 @@
+data/
+logs/
+*.pt
+*.ptz
+*.bin
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+train_gpt_fixed.py
+train_gpt_int6.py
